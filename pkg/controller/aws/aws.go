@@ -27,6 +27,7 @@ import (
 func init() {
 	// AddToManagerFuncs is a list of functions to create controllers and add them to a manager.
 	AddToManagerFuncs = append(AddToManagerFuncs, compute.Add)
+	AddToManagerFuncs = append(AddToManagerFuncs, compute.AddNodePoolReconciler)
 	AddToManagerFuncs = append(AddToManagerFuncs, rds.Add)
 	AddToManagerFuncs = append(AddToManagerFuncs, provider.Add)
 	AddToManagerFuncs = append(AddToManagerFuncs, s3.Add)
