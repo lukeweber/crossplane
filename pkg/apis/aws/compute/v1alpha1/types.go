@@ -17,16 +17,21 @@ limitations under the License.
 package v1alpha1
 
 import (
+	corev1alpha1 "github.com/crossplaneio/crossplane/pkg/apis/core/v1alpha1"
+	"github.com/crossplaneio/crossplane/pkg/util"
+	"github.com/ghodss/yaml"
+	"k8s.io/api/core/v1"
 	"strconv"
 	"strings"
 
-	corev1alpha1 "github.com/crossplaneio/crossplane/pkg/apis/core/v1alpha1"
-	"github.com/crossplaneio/crossplane/pkg/util"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
 const (
+	eksAuthConfigMapName = "aws-auth"
+	eksAuthMapRolesKey   = "mapRoles"
+	eksAuthMapUsersKey   = "mapUsers"
 
 	// The resource is being created. The resource is inaccessible while it is being created.
 	ClusterStatusCreating = "CREATING"
@@ -149,6 +154,54 @@ type EKSClusterSpec struct {
 
 	// ReclaimPolicy identifies how to handle the cloud resource after the deletion of this type
 	ReclaimPolicy corev1alpha1.ReclaimPolicy `json:"reclaimPolicy,omitempty"`
+}
+
+// generateAWSAuthConfigMap generates the configmap for configure auth
+func (r *EKSCluster) GenerateAWSAuthConfigMap(clusterNodeARN map[string]string) (*v1.ConfigMap, error) {
+	data := map[string]string{}
+	var roles []MapRole
+
+	// Copy spec roles
+	roles = append(roles, r.Spec.MapRoles...)
+
+	// Generate system roles needed for nodes to communicate with master
+	for _, arn := range clusterNodeARN {
+		defaultNodeRole := MapRole{
+			RoleARN:  arn,
+			Username: "system:node:{{EC2PrivateDNSName}}",
+			Groups:   []string{"system:bootstrappers", "system:nodes"},
+		}
+		roles = append(roles, defaultNodeRole)
+	}
+
+	// Serialize mapRoles
+	rolesMarshalled, err := yaml.Marshal(roles)
+	if err != nil {
+		return nil, err
+	}
+
+	data[eksAuthMapRolesKey] = string(rolesMarshalled)
+
+	// Serialize mapUsers
+	if len(r.Spec.MapUsers) > 0 {
+		usersMarshalled, err := yaml.Marshal(r.Spec.MapUsers)
+		if err != nil {
+			return nil, err
+		}
+		data[eksAuthMapUsersKey] = string(usersMarshalled)
+	}
+
+	name := eksAuthConfigMapName
+	namespace := "kube-system"
+	cm := v1.ConfigMap{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      name,
+			Namespace: namespace,
+		},
+		Data: data,
+	}
+
+	return &cm, nil
 }
 
 // MapRole maps an aws role to kubernetes groups
@@ -356,9 +409,6 @@ type EKSClusterStatus struct {
 	ClusterName string `json:"resourceName,omitempty"`
 	// Endpoint for cluster
 	Endpoint string `json:"endpoint,omitempty"`
-
-	//AttachedNodePools map of nodepool names to nodeInstanceARN that must be added in configmap
-	AttachedNodePools map[string]string `json:"attachedNodePools,omitempty"`
 
 	ConnectionSecretRef corev1.LocalObjectReference `json:"connectionSecretRef,omitempty"`
 }
